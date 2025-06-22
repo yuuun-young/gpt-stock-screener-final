@@ -68,3 +68,29 @@ if __name__ == "__main__":
     df = pd.DataFrame(results)
     df.to_csv("filtered_stocks.csv", index=False)
     print(df)
+    
+def get_stock_summary(ticker: str):
+    import yfinance as yf
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # 최근 분기 매출 (API 개선용)
+        fin = stock.quarterly_financials
+        if "Total Revenue" in fin.index and not fin.loc["Total Revenue"].empty:
+            quarterly_revenue = fin.loc["Total Revenue"].iloc[0]
+        else:
+            quarterly_revenue = None
+
+        summary = {
+            "ticker": ticker,
+            "name": info.get("shortName", "N/A"),
+            "sector": info.get("sector", "N/A"),
+            "industry": info.get("industry", "N/A"),
+            "marketCap": info.get("marketCap"),
+            "totalRevenue": int(quarterly_revenue) if quarterly_revenue else None,
+            "summary": info.get("longBusinessSummary", "No summary available.")
+        }
+        return summary
+    except Exception as e:
+        return {"error": str(e)}
