@@ -1,22 +1,11 @@
 import yfinance as yf
 import openai
 import os
-import time
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def get_all_us_tickers():
-    try:
-        from yfinance import tickers_nasdaq, tickers_sp500
-        tickers = tickers_nasdaq()
-        tickers += [t for t in tickers_sp500() if t not in tickers]
-        return tickers
-    except Exception as e:
-        print(f"[티커 수집 오류] {e}")
-        return []
-
 def run_stock_filter():
-    tickers = get_all_us_tickers()
+    tickers = yf.tickers_sp500().tickers + yf.tickers_nasdaq().tickers + yf.tickers_other().tickers
     selected = []
     for ticker in tickers:
         try:
@@ -29,8 +18,19 @@ def run_stock_filter():
                     "Revenue": revenue,
                     "Market Cap": market_cap
                 })
-            time.sleep(0.2)  # 너무 빠른 요청 방지
-        except Exception as e:
-            print(f"[오류] {ticker}: {e}")
+        except Exception:
             continue
     return selected
+
+def get_stock_summary(ticker: str):
+    try:
+        info = yf.Ticker(ticker).info
+        prompt = f"Summarize this stock based on the following data:
+{info}"
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message["content"]
+    except Exception as e:
+        return {"error": str(e)}
