@@ -1,32 +1,43 @@
 import yfinance as yf
+import pandas as pd
 
-def run_stock_filter():
-    tickers = yf.Tickers(' '.join(get_nasdaq_nyse_tickers()))
-    result = []
-    for ticker_symbol, ticker_obj in tickers.tickers.items():
-        try:
-            info = ticker_obj.info
-            market_cap = info.get("marketCap", 0)
-            revenue = info.get("totalRevenue", 0)
-            current_ratio = info.get("currentRatio", 0)
-            psr = market_cap / revenue if revenue else None
-
-            if market_cap and revenue:
-                if market_cap < 5e9 and (
-                    (psr and psr < 0.1) +
-                    (current_ratio and current_ratio > 1.5)
-                ) >= 2:
-                    result.append({
-                        "ticker": ticker_symbol,
-                        "market_cap": market_cap,
-                        "revenue": revenue,
-                        "current_ratio": current_ratio,
-                        "psr": psr
-                    })
-        except Exception:
-            continue
-    return result
 
 def get_nasdaq_nyse_tickers():
-    from yfinance import tickers_nasdaq, tickers_other
-    return tickers_nasdaq() + tickers_other()
+    nasdaq_url = "https://old.nasdaq.com/screening/companies-by-industry.aspx?exchange=NASDAQ&render=download"
+    nyse_url = "https://old.nasdaq.com/screening/companies-by-industry.aspx?exchange=NYSE&render=download"
+
+    try:
+        nasdaq_df = pd.read_csv(nasdaq_url)
+        nyse_df = pd.read_csv(nyse_url)
+    except Exception as e:
+        print(f"Error fetching ticker data: {e}")
+        return []
+
+    tickers = list(nasdaq_df['Symbol'].dropna()) + list(nyse_df['Symbol'].dropna())
+    return tickers
+
+
+def run_stock_filter():
+    tickers = get_nasdaq_nyse_tickers()
+
+    result = []
+    for ticker in tickers[:200]:  # 과부하 방지를 위해 우선 200개만 사용
+        try:
+            info = yf.Ticker(ticker).info
+            if info and 'marketCap' in info and 'totalRevenue' in info:
+                market_cap = info['marketCap']
+                revenue = info['totalRevenue']
+
+                if revenue and market_cap and revenue > 0:
+                    psr = market_cap / revenue
+                    if psr < 1:
+                        result.append({
+                            'ticker': ticker,
+                            'psr': round(psr, 2),
+                            'marketCap': market_cap,
+                            'revenue': revenue
+                        })
+        except Exception as e:
+            continue
+
+    return result
