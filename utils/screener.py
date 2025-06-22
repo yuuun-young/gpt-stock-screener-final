@@ -20,20 +20,23 @@ def run_stock_filter():
 
     for ticker in tickers:
         try:
-            data = yf.Ticker(ticker).info
-            revenue = data.get("totalRevenue")
-            market_cap = data.get("marketCap")
+            stock = yf.Ticker(ticker)
+            fin = stock.financials
+            revenue = fin.loc["Total Revenue"][0] if "Total Revenue" in fin.index else None
+            market_cap = stock.info.get("marketCap")
 
             if revenue and market_cap and revenue * 10 > market_cap:
                 selected.append({
                     "ticker": ticker,
-                    "Revenue": revenue,
-                    "Market Cap": market_cap
+                    "Revenue": int(revenue),
+                    "Market Cap": int(market_cap)
                 })
+            else:
+                print(f"❌ 제외됨: {ticker}, Revenue={revenue}, MCap={market_cap}")
 
-            time.sleep(1.0)  # 과도한 요청 방지 (API Rate limit 보호)
+            time.sleep(0.7)
         except Exception as e:
-            logging.warning(f"{ticker} 오류: {e}")
+            print(f"[오류] {ticker}: {e}")
             continue
 
     return selected
