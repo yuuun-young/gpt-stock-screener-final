@@ -1,55 +1,70 @@
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import time
+import logging
 
-def get_all_tickers_from_nasdaq():
-    url = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/nasdaqlisted.txt"
-    df = pd.read_csv(url, sep="|")
-    return df["Symbol"].tolist()[:-1]
+logging.basicConfig(level=logging.INFO)
 
-def run_filtered_stock_scan(limit=3000, max_market_cap=3e8, min_ratio=5):
-    tickers = get_all_tickers_from_nasdaq()[:limit]
+# ✅ CSV에서 티커 로딩 (예: NASDAQ 중소형주 리스트)
+def get_tickers_from_csv(file_path="nasdaq_screener.csv"):
+    try:
+        df = pd.read_csv(file_path)
+        tickers = df["Symbol"].dropna().unique().tolist()
+        logging.info(f"총 {len(tickers)}개 티커 로딩 완료")
+        return tickers
+    except Exception as e:
+        logging.error(f"[CSV 로딩 실패] {e}")
+        return []
+
+# ✅ 조건 필터 실행
+def run_stock_filter():
+    tickers = get_tickers_from_csv()
     selected = []
 
     for ticker in tickers:
         try:
             stock = yf.Ticker(ticker)
-            info = stock.info
+
+            # 분기 재무 정보
             fin = stock.quarterly_financials
+            if "Total Revenue" not in fin.index or fin.loc["Total Revenue"].empty:
+                continue
+            revenue = fin.loc["Total Revenue"].iloc[0]  # 최신 분기 매출
 
-            revenue = None
-            if "Total Revenue" in fin.index and not fin.loc["Total Revenue"].empty:
-                revenue = fin.loc["Total Revenue"].iloc[0]
+            # 시가총액 정보
+            info = stock.info
+            market_cap = info.get("marketCap", None)
 
-            market_cap = info.get("marketCap")
+            if revenue is None or market_cap is None:
+                continue
 
-            if revenue and market_cap:
-                ratio = revenue / market_cap if market_cap else 0
-                if ratio >= min_ratio and market_cap < max_market_cap:
-                    selected.append({
-                        "ticker": ticker,
-                        "Quarterly Revenue": int(revenue),
-                        "Market Cap": int(market_cap),
-                        "Ratio": round(ratio, 2),
-                        "Name": info.get("shortName", ""),
-                        "Sector": info.get("sector", ""),
-                        "Industry": info.get("industry", "")
-                    })
-                else:
-                    print(f"❌ 제외됨: {ticker} - ratio={round(ratio,2)}, rev={revenue}, mcap={market_cap}")
-            else:
-                print(f"⚠️ 데이터 부족: {ticker}")
+            # ✅ 조건 비교 (엄격/완화 모두)
+            tag = None
+            if revenue * 10 > market_cap:
+                tag = "✅ 기준 만족 (x10)"
+            elif revenue * 8 > market_cap:
+                tag = "⚠️ 완화 기준 (x8)"
+
+            if tag and market_cap < 3_000_000_000:  # 30억 달러 이하 (중소형주)
+                selected.append({
+                    "ticker": ticker,
+                    "name": info.get("shortName", ""),
+                    "revenue": int(revenue),
+                    "marketCap": int(market_cap),
+                    "tag": tag
+                })
 
             time.sleep(0.5)
 
         except Exception as e:
-            print(f"[오류] {ticker}: {e}")
+            logging.warning(f"[{ticker} 오류] {e}")
             continue
 
-    return pd.DataFrame(selected)
+    return selected
 
-# 사용 예시
+# ✅ 실행 예시
 if __name__ == "__main__":
-    df = run_filtered_stock_scan(min_ratio=5)  # 5배 이상으로 완화 가능
-    df.to_csv("filtered_stocks_relaxed.csv", index=False)
-    print("✅ 완료: 조건 충족 종목 수 =", len(df))
+    results = run_stock_filter()
+    df = pd.DataFrame(results)
+    df.to_csv("filtered_stocks.csv", index=False)
+    print(df)
