@@ -1,92 +1,63 @@
 import yfinance as yf
 import pandas as pd
 import requests
-from fastapi import FastAPI
-from typing import List
+from bs4 import BeautifulSoup
 
-app = FastAPI()
+def get_small_cap_tickers(min_cap=1e8, max_cap=3e9):
+    url = "https://finance.yahoo.com/screener/predefined/ms_small_cap"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
+    scripts = soup.find_all("script")
+    tickers = []
 
+    for script in scripts:
+        if "root.App.main" in script.text:
+            try:
+                raw_json = script.text.split("root.App.main = ")[1].split(";\n}(this));")[0]
+                import json
+                data = json.loads(raw_json)
+                stores = data["context"]["dispatcher"]["stores"]
+                quotes = stores["ScreenerResultsStore"]["results"]["rows"]
+                for q in quotes:
+                    cap = q.get("marketCap", 0)
+                    if min_cap < cap < max_cap:
+                        tickers.append(q["symbol"])
+                break
+            except Exception:
+                continue
+    return tickers
 
-# ✅ NASDAQ 전체 티커 불러오기 (nasdaqlisted.txt)
-def get_nasdaq_tickers() -> List[str]:
-    url = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/nasdaqlisted.txt"
-    try:
-        df = pd.read_csv(url, sep="|")
-        tickers = df['Symbol'].dropna().tolist()
-        return [t for t in tickers if t.isalpha()]  # 숫자/기호 제외
-    except Exception as e:
-        print(f"[티커 로딩 실패] {e}")
-        return []
-
-
-# ✅ 조건 필터링
-@app.get("/filter_stocks")
-def filter_stocks():
-    tickers = get_nasdaq_tickers()
-    filtered_stocks = []
-
-    for ticker in tickers:
-        try:
-            stock = yf.Ticker(ticker)
-            market_cap = stock.info.get("marketCap")
-
-            if market_cap is None or market_cap > 3_000_000_000:
-                continue  # 시총 30억 초과 또는 정보 없음
-
-            revenue = stock.quarterly_financials.loc["Total Revenue"].iloc[0]
-
-            # 기본 조건: 분기 매출 x 10 > 시가총액
-            if revenue * 10 > market_cap:
-                filtered_stocks.append({
-                    "ticker": ticker,
-                    "market_cap": market_cap,
-                    "quarterly_revenue": revenue,
-                    "condition": "R×10 > 시총"
-                })
-
-            # 조건 완화 fallback (optional)
-            elif revenue * 5 > market_cap:
-                filtered_stocks.append({
-                    "ticker": ticker,
-                    "market_cap": market_cap,
-                    "quarterly_revenue": revenue,
-                    "condition": "R×5 > 시총 (완화)"
-                })
-
-        except Exception as e:
-            continue
-
-    return {"filtered_stocks": filtered_stocks}
-
-# ✅ 실행 예시
-if __name__ == "__main__":
-    results = run_stock_filter()
-    df = pd.DataFrame(results)
-    df.to_csv("filtered_stocks.csv", index=False)
-    print(df)
-    
-def get_stock_summary(ticker: str):
-    import yfinance as yf
+def get_stock_summary(ticker):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-
-        # 최근 분기 매출 (API 개선용)
         fin = stock.quarterly_financials
         if "Total Revenue" in fin.index and not fin.loc["Total Revenue"].empty:
             quarterly_revenue = fin.loc["Total Revenue"].iloc[0]
         else:
             quarterly_revenue = None
 
-        summary = {
+        return {
             "ticker": ticker,
             "name": info.get("shortName", "N/A"),
             "sector": info.get("sector", "N/A"),
             "industry": info.get("industry", "N/A"),
             "marketCap": info.get("marketCap"),
-            "totalRevenue": int(quarterly_revenue) if quarterly_revenue else None,
+            "quarterlyRevenue": int(quarterly_revenue) if quarterly_revenue else None,
             "summary": info.get("longBusinessSummary", "No summary available.")
         }
-        return summary
     except Exception as e:
-        return {"error": str(e)}
+        return {"ticker": ticker, "error": str(e)}
+
+def filter_stocks():
+    tickers = get_small_cap_tickers()
+    results = []
+
+    for ticker in tickers:
+        data = get_stock_summary(ticker)
+        if data.get("marketCap") and data.get("quarterlyRevenue"):
+            if data["quarterlyRevenue"] * 10 > data["marketCap"]:
+                results.append(data)
+
+    return results
