@@ -1,43 +1,36 @@
 import yfinance as yf
-import pandas as pd
+import openai
+import os
+import time
 
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def get_nasdaq_nyse_tickers():
-    nasdaq_url = "https://old.nasdaq.com/screening/companies-by-industry.aspx?exchange=NASDAQ&render=download"
-    nyse_url = "https://old.nasdaq.com/screening/companies-by-industry.aspx?exchange=NYSE&render=download"
-
+def get_all_us_tickers():
     try:
-        nasdaq_df = pd.read_csv(nasdaq_url)
-        nyse_df = pd.read_csv(nyse_url)
+        from yfinance import tickers_nasdaq, tickers_sp500
+        tickers = tickers_nasdaq()
+        tickers += [t for t in tickers_sp500() if t not in tickers]
+        return tickers
     except Exception as e:
-        print(f"Error fetching ticker data: {e}")
+        print(f"[티커 수집 오류] {e}")
         return []
 
-    tickers = list(nasdaq_df['Symbol'].dropna()) + list(nyse_df['Symbol'].dropna())
-    return tickers
-
-
 def run_stock_filter():
-    tickers = get_nasdaq_nyse_tickers()
-
-    result = []
-    for ticker in tickers[:200]:  # 과부하 방지를 위해 우선 200개만 사용
+    tickers = get_all_us_tickers()
+    selected = []
+    for ticker in tickers:
         try:
-            info = yf.Ticker(ticker).info
-            if info and 'marketCap' in info and 'totalRevenue' in info:
-                market_cap = info['marketCap']
-                revenue = info['totalRevenue']
-
-                if revenue and market_cap and revenue > 0:
-                    psr = market_cap / revenue
-                    if psr < 1:
-                        result.append({
-                            'ticker': ticker,
-                            'psr': round(psr, 2),
-                            'marketCap': market_cap,
-                            'revenue': revenue
-                        })
+            data = yf.Ticker(ticker).info
+            revenue = data.get("totalRevenue", 0)
+            market_cap = data.get("marketCap", 1)
+            if revenue and market_cap and revenue * 10 > market_cap:
+                selected.append({
+                    "ticker": ticker,
+                    "Revenue": revenue,
+                    "Market Cap": market_cap
+                })
+            time.sleep(0.2)  # 너무 빠른 요청 방지
         except Exception as e:
+            print(f"[오류] {ticker}: {e}")
             continue
-
-    return result
+    return selected
