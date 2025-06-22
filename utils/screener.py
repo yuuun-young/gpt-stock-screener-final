@@ -25,8 +25,7 @@ def run_stock_filter():
 def get_stock_summary(ticker: str):
     try:
         info = yf.Ticker(ticker).info
-        prompt = f"Summarize this stock based on the following data:
-{info}"
+        prompt = f"Summarize this stock based on the following data:\n{info}"
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}]
