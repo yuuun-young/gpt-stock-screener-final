@@ -5,7 +5,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-def get_us_tickers(limit=300):  # 중소형주 중심으로 나스닥 100~300개만 임시 수집
+def get_us_tickers(limit=1000):  # 중소형주 중심으로 나스닥 100~300개만 임시 수집
     try:
         table = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")[4]
         tickers = table["Ticker"].tolist()
@@ -21,20 +21,21 @@ def run_stock_filter():
     for ticker in tickers:
         try:
             stock = yf.Ticker(ticker)
-            fin = stock.financials
+            fin = stock.quarterly_financials
             revenue = fin.loc["Total Revenue"][0] if "Total Revenue" in fin.index else None
             market_cap = stock.info.get("marketCap")
 
             if revenue and market_cap and revenue * 10 > market_cap:
                 selected.append({
                     "ticker": ticker,
-                    "Revenue": int(revenue),
+                    "Quarterly Revenue": int(revenue),
                     "Market Cap": int(market_cap)
                 })
             else:
                 print(f"❌ 제외됨: {ticker}, Revenue={revenue}, MCap={market_cap}")
 
-            time.sleep(0.7)
+            time.sleep(0.5)
+
         except Exception as e:
             print(f"[오류] {ticker}: {e}")
             continue
