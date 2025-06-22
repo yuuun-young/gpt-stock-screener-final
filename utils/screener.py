@@ -1,66 +1,62 @@
 import yfinance as yf
 import pandas as pd
-import time
-import logging
+import requests
+from fastapi import FastAPI
+from typing import List
 
-logging.basicConfig(level=logging.INFO)
+app = FastAPI()
 
-# ✅ CSV에서 티커 로딩 (예: NASDAQ 중소형주 리스트)
-def get_tickers_from_csv(file_path="nasdaq_screener.csv"):
+
+# ✅ NASDAQ 전체 티커 불러오기 (nasdaqlisted.txt)
+def get_nasdaq_tickers() -> List[str]:
+    url = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/nasdaqlisted.txt"
     try:
-        df = pd.read_csv(file_path)
-        tickers = df["Symbol"].dropna().unique().tolist()
-        logging.info(f"총 {len(tickers)}개 티커 로딩 완료")
-        return tickers
+        df = pd.read_csv(url, sep="|")
+        tickers = df['Symbol'].dropna().tolist()
+        return [t for t in tickers if t.isalpha()]  # 숫자/기호 제외
     except Exception as e:
-        logging.error(f"[CSV 로딩 실패] {e}")
+        print(f"[티커 로딩 실패] {e}")
         return []
 
-# ✅ 조건 필터 실행
-def run_stock_filter():
-    tickers = get_tickers_from_csv()
-    selected = []
+
+# ✅ 조건 필터링
+@app.get("/filter_stocks")
+def filter_stocks():
+    tickers = get_nasdaq_tickers()
+    filtered_stocks = []
 
     for ticker in tickers:
         try:
             stock = yf.Ticker(ticker)
+            market_cap = stock.info.get("marketCap")
 
-            # 분기 재무 정보
-            fin = stock.quarterly_financials
-            if "Total Revenue" not in fin.index or fin.loc["Total Revenue"].empty:
-                continue
-            revenue = fin.loc["Total Revenue"].iloc[0]  # 최신 분기 매출
+            if market_cap is None or market_cap > 3_000_000_000:
+                continue  # 시총 30억 초과 또는 정보 없음
 
-            # 시가총액 정보
-            info = stock.info
-            market_cap = info.get("marketCap", None)
+            revenue = stock.quarterly_financials.loc["Total Revenue"].iloc[0]
 
-            if revenue is None or market_cap is None:
-                continue
-
-            # ✅ 조건 비교 (엄격/완화 모두)
-            tag = None
+            # 기본 조건: 분기 매출 x 10 > 시가총액
             if revenue * 10 > market_cap:
-                tag = "✅ 기준 만족 (x10)"
-            elif revenue * 8 > market_cap:
-                tag = "⚠️ 완화 기준 (x8)"
-
-            if tag and market_cap < 3_000_000_000:  # 30억 달러 이하 (중소형주)
-                selected.append({
+                filtered_stocks.append({
                     "ticker": ticker,
-                    "name": info.get("shortName", ""),
-                    "revenue": int(revenue),
-                    "marketCap": int(market_cap),
-                    "tag": tag
+                    "market_cap": market_cap,
+                    "quarterly_revenue": revenue,
+                    "condition": "R×10 > 시총"
                 })
 
-            time.sleep(0.5)
+            # 조건 완화 fallback (optional)
+            elif revenue * 5 > market_cap:
+                filtered_stocks.append({
+                    "ticker": ticker,
+                    "market_cap": market_cap,
+                    "quarterly_revenue": revenue,
+                    "condition": "R×5 > 시총 (완화)"
+                })
 
         except Exception as e:
-            logging.warning(f"[{ticker} 오류] {e}")
             continue
 
-    return selected
+    return {"filtered_stocks": filtered_stocks}
 
 # ✅ 실행 예시
 if __name__ == "__main__":
